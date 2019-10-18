@@ -108,7 +108,8 @@ class MADDPG():
     
     def step(self, states, actions, rewards, next_states, dones):
         '''
-        Save experience in replay memory, and use random sample from buffer to train the agents
+        Save experience in replay memory, and use random sample from
+        buffer to train the agents
         
         
         Arguments
@@ -134,7 +135,7 @@ class MADDPG():
             # Reset update counter
             self.update_counter = 0
             
-            # Update only if sufficient number of samples are stored in replay buffer
+            # Update only if sufficient number of samples are available
             if len(self.memory) >= self.memory.batch_size:
                 
                 experiences = self.memory.sample()
@@ -146,67 +147,35 @@ class MADDPG():
 
         states, actions, rewards, next_states, dones = experiences
 
-        
-        # Augment states
-        #augmented_states = states.flatten()
-        #augmented_next_states = next_states.flatten()
-        
-        # Calculate next actions and augment them in on vector
-        next_actions = []
-        
+        # Calculate next actions and augment them
+        next_actions = torch.zeros(self.memory.batch_size, 
+                                   self.nbr_agents*self.dim_action).float().to(device)
         
         for k in range(self.nbr_agents):
             states_k = states[:, k*self.dim_observation:(k+1)*self.dim_observation]
-            next_action_k = self.agents[k].actor_target(state)
-            next_actions.append(next_action_k)
+            next_actions[:, k*self.dim_action:(k+1)*self.dim_action] = \
+            self.agents[k].actor_target(states_k)
             
-        next_actions = torch.FloatTensor(np.asarray(next_augmented_actions)).to(device)
-        
-        
-        
-        #for agent, state in zip(self.agents, states):
-        #    next_action = agent.actor_target(state)
-        #    next_augmented_actions.append(next_action)
-        
-        #next_augmented_actions = np.asarray(next_augmented_actions)
-
         
         for k in range(self.nbr_agents):
             
             # Update local critic networks
-            self.agents[k].update_critic(states(), 
-                                         next_states(),
-                                         actions(),
+            self.agents[k].update_critic(states, 
+                                         next_states,
+                                         actions,
                                          next_actions, 
-                                         reward[:,k],
-                                         done[k])
+                                         rewards[:,k],
+                                         dones[:,k])
             
             
             # Update local actor networks 
             self.agents[k].update_actor(states, actions)
-            
-        
-            
-        
-        
-        for agent, reward, done in zip(self.agents, rewards, dones):
-        
-            # Update local critic networks
-            agent.update_critic(states.flatten(), 
-                                next_states.flatten(),
-                                actions.flatten(),
-                                next_augmented_actions,
-                                reward,
-                                done)
-            
-            # Update local actor networks 
-            agent.update_actor(states.flatten(), actions.flatten())
-            
+         
             
         # Update target networks           
         for agent in self.agents:
-            self.soft_update(agent.critic_local, agent.critic_target)
-            self.soft_update(agent.actor_local, agent.actor_target)        
+            agent.soft_update(agent.critic_local, agent.critic_target)
+            agent.soft_update(agent.actor_local, agent.actor_target)        
         
             
 
@@ -314,7 +283,7 @@ class DDPG():
         
         # compute Q target values
         next_Q_targets = self.critic_target(next_states, next_actions)
-        Q_targets = reward + (self.gamma*next_Q_targets*(1 - dones))                     
+        Q_targets = reward + (self.gamma*next_Q_targets*(1 - done))                     
                              
                             
         # compute loss
@@ -323,19 +292,18 @@ class DDPG():
         
         # update weigths
         self.critic_optimizer.zero_grad()
-        critic_loss.backward()
+        critic_loss.backward(retain_graph=True)
         torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(), 1)
         self.critic_optimizer.step()
         
         
         
-    def update_actor(self, state, states, actions):
+    def update_actor(self, states, actions):
         '''
         Updates deep policy networks (actor) using the augmented state vector
         
         Params
         ======
-            state : individual observation
             states : augmented observation vector
             actions : augmented action vector
         '''
