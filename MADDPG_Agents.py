@@ -77,7 +77,10 @@ class MADDPG():
         
         self.reset()
          
-            
+
+        
+        
+        
     
     def reset(self):
         '''
@@ -236,6 +239,12 @@ class DDPG():
         # Noise process
         self.noise = OUNoise(action_size, random_seed)
               
+            
+        # Reset agent
+        self.reset()
+        
+        
+        
         
         
     def act(self, state, add_noise=True):
@@ -262,8 +271,11 @@ class DDPG():
         '''
         '''
         self.noise.reset()
- 
-       
+        
+        # FIXXME - just for debug output
+        self.nbr_updates_actor = 0
+        self.nbr_updates_critic = 0
+      
         
         
     def update_critic(self, states, next_states, actions, next_actions, reward, done):
@@ -297,6 +309,11 @@ class DDPG():
         self.critic_optimizer.step()
         
         
+        # FIXXME - just for debug output
+        self.nbr_updates_critic += 1
+
+        
+        
         
     def update_actor(self, states, actions):
         '''
@@ -314,7 +331,10 @@ class DDPG():
         # update weights
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor_local.parameters(), 1)
         self.actor_optimizer.step() 
+        
+        self.nbr_updates_actor += 1
         
         
         
