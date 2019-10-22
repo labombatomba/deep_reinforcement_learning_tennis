@@ -14,78 +14,62 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 
-
 class MADDPG():
-    '''
-    Multiagent deep deterministic policy gradient super agent
-    '''
-
+    
+    
     def __init__(self,
-                 dim_observation,
-                 dim_action,
+                 state_size,
+                 action_size,
                  nbr_agents,
                  random_seed,
-                 gamma, 
+                 gamma,
                  lr_actor,
                  lr_critic,
                  weight_decay,
                  tau,
+                 update_rate,
+                 updates_per_step,
                  buffer_size,
-                 batch_size,
-                 update_rate):
+                 batch_size):
         
-        '''
-        Initialize an MDDPG parent class.
         
-        Params
-        ======
-            dim_observation (int): dimension of individual observation space (same for all agents)
-            dim_action (int): dimension of individual action space (same for all agents)
-            random_seed (int): random seed
-            nbr_agents (int): number of agents
-        '''  
-    
-
-        self.dim_observation = dim_observation
-        self.dim_action = dim_action
+        self.state_size = state_size
+        self.action_size = action_size
         self.nbr_agents = nbr_agents
         self.update_rate = update_rate
+        self.updates_per_step = updates_per_step
+        self.tau = tau
         
-        
-        # Instantiate DDPG agents
+        # Instantiate DDPG Agents
+        ddpg_parameter = dict()
+        ddpg_parameter['state_size'] = state_size
+        ddpg_parameter['action_size'] = action_size
+        ddpg_parameter['nbr_agents'] = nbr_agents
+        ddpg_parameter['random_seed'] = random_seed
+        ddpg_parameter['gamma'] = gamma
+        ddpg_parameter['lr_actor'] = lr_actor
+        ddpg_parameter['lr_critic'] = lr_critic
+        ddpg_parameter['weight_decay'] = weight_decay
+                
+
         self.agents = []
         
-        agent_parameter = dict()
-        agent_parameter['state_size'] = self.dim_observation
-        agent_parameter['action_size'] = self.dim_action
-        agent_parameter['nbr_agents'] = self.nbr_agents
-        
-        agent_parameter['gamma'] = gamma
-        agent_parameter['lr_actor'] = lr_actor
-        agent_parameter['lr_critic'] = lr_critic
-        agent_parameter['weight_decay'] = weight_decay
-        agent_parameter['tau'] = tau
-        agent_parameter['random_seed'] = random_seed
-        
+        for _ in range(nbr_agents):
+            self.agents.append(DDPG(**ddpg_parameter))
 
-        for _ in range(self.nbr_agents):
-            self.agents.append(DDPG(**agent_parameter))
-        
-        
-        # Instantiate replay memory
-        self.memory = ReplayBuffer(buffer_size, batch_size, random_seed)
+
+        # Instantiate Replay Memory
+        self.memory = ReplayBuffer(buffer_size,
+                                   batch_size,
+                                   random_seed)
         
         self.reset()
-         
+        
 
         
         
-        
-    
     def reset(self):
-        '''
-        FIXXME
-        '''
+        
         for agent in self.agents:
             agent.reset()
             
@@ -94,98 +78,99 @@ class MADDPG():
         
         
         
-    def act(self, observations):
-        '''
-        FIXXME
-        '''
+    def act(self, states, std_dev):
         
         actions = []
         
-        for state, agent in zip(observations, self.agents):
-            actions.append(agent.act(state))
-            
+        for state, agent in zip(states, self.agents):
+            actions.append(agent.act(state, std_dev))
+        
         return np.asarray(actions)
 
         
-     
     
-    def step(self, states, actions, rewards, next_states, dones):
-        '''
-        Save experience in replay memory, and use random sample from
-        buffer to train the agents
+    
+    def step(self, states, actions, rewards, next_states, dones, train=True):
         
-        
-        Arguments
-        =========
-            states (float): (nbr_agents x dim_observation) numpy array
-            actions (float): (nbr_agents x dim_action) numpy array
-            rewards (float): (1 x nbr_agents) list
-            dones (bool) : (1 x nbr_agents) list
-        '''
-                
-        # Store experiences
+        # store in replay buffer
         self.memory.add(states.flatten(),
                         actions.flatten(),
-                        rewards,
+                        np.asarray(rewards),
                         next_states.flatten(),
-                        dones)
+                        np.asarray(dones))
         
-        # Update counter
-        self.update_counter += 1 
+         
+        if train:
+            
+            if len(self.memory) > self.memory.batch_size:  
+                self.update_counter += 1 
+            
+                if self.update_counter == self.update_rate:
+                    self.update_counter = 0
+                    
+                    for _ in range(self.updates_per_step):
+                        self.learn()
+                
         
-        if self.update_counter % self.update_rate == 0:
-            
-            # Reset update counter
-            self.update_counter = 0
-            
-            # Update only if sufficient number of samples are available
-            if len(self.memory) >= self.memory.batch_size:
-                
-                experiences = self.memory.sample()
-                self.learn(experiences)
-                
-                
-                
-    def learn(self, experiences):
 
-        states, actions, rewards, next_states, dones = experiences
+    def learn(self):
 
-        # Calculate next actions and augment them
-        next_actions = torch.zeros(self.memory.batch_size, 
-                                   self.nbr_agents*self.dim_action).float().to(device)
         
-        for k in range(self.nbr_agents):
-            states_k = states[:, k*self.dim_observation:(k+1)*self.dim_observation]
-            next_actions[:, k*self.dim_action:(k+1)*self.dim_action] = \
-            self.agents[k].actor_target(states_k)
+        # Update Local Networks
+        for i in range(self.nbr_agents):
             
+            # Sample a random minibatch from replay buffer
+            experiences = self.memory.sample()
+            states, actions, rewards, next_states, dones = experiences
+            
+            
+            # Calculate augmented next actions for critic target
+            critic_aug_next_actions = torch.zeros_like(actions, 
+                                                       dtype=torch.float,
+                                                       device=device)
+            
+            for k in range(self.nbr_agents):
+                next_states_k = next_states[0, k*self.state_size:(k+1)*self.state_size]
+                next_actions_k = self.agents[k].actor_target(next_states_k)
+                critic_aug_next_actions[:, k*self.action_size:(k+1)*self.action_size] = next_actions_k
+                
+            
+            # Caculate augmented actions taking the ith policy into account
+            states_i = states[0, i*self.state_size:(i+1)*self.state_size]
+            actor_aug_actions = actions.clone()
+            
+            actor_aug_actions[:, i*self.action_size:(i+1)*self.action_size] = \
+            self.agents[i].actor_local(states_i)
+            
+            
+                
+            # Update local critic and actor networks     
+            self.agents[i].learn(states,
+                                 next_states,
+                                 actions, 
+                                 critic_aug_next_actions,
+                                 actor_aug_actions,
+                                 rewards[:,i].view(-1,1), # convert to column vector
+                                 dones[:,i].view(-1,1))   # convert to column vector
+            
+                
+                
+        # Update Target Networks
+        for ddpg_agent in self.agents:
+            ddpg_agent.soft_update(ddpg_agent.critic_local,
+                                   ddpg_agent.critic_target,
+                                   self.tau)
+            
+            ddpg_agent.soft_update(ddpg_agent.actor_local,
+                                   ddpg_agent.actor_target,
+                                   self.tau)
         
-        for k in range(self.nbr_agents):
-            
-            # Update local critic networks
-            self.agents[k].update_critic(states, 
-                                         next_states,
-                                         actions,
-                                         next_actions, 
-                                         rewards[:,k],
-                                         dones[:,k])
             
             
-            # Update local actor networks 
-            self.agents[k].update_actor(states, actions)
          
             
-        # Update target networks           
-        for agent in self.agents:
-            agent.soft_update(agent.critic_local, agent.critic_target)
-            agent.soft_update(agent.actor_local, agent.actor_target)        
-        
-            
-
 class DDPG():
-    '''
-    Deep determinstic policy gradient agent
-    '''
+    
     
     def __init__(self, 
                  state_size,
@@ -193,153 +178,174 @@ class DDPG():
                  nbr_agents,
                  random_seed,
                  gamma,
-                 lr_actor, 
+                 lr_actor,
                  lr_critic,
-                 weight_decay, 
-                 tau):
-        '''
-        Initialize an DDPG Agent object.
-        
-        Params
-        ======
-            state_size (int): dimension of each state
-            action_size (int): dimension of each action
-            nbr_agents (int): number of agents interacting in the environment
-            random_seed (int): random seed
-            
-        '''    
-        
+                 weight_decay):
+    
+
         self.state_size = state_size
         self.action_size = action_size
         self.nbr_agents = nbr_agents
-        
+
         self.seed = random.seed(random_seed)
-        
+
         # Hyperparameter
         self.gamma = gamma
         self.lr_actor = lr_actor
         self.lr_critic = lr_critic
-        self.tau = tau
 
-        
+
         # Instantiate Actor Networks
-        self.actor_local = Actor(state_size, action_size, random_seed).to(device)
-        self.actor_target = Actor(state_size, action_size, random_seed).to(device)
-        
+        self.actor_local = Actor(state_size, 
+                                 action_size,
+                                 random_seed).to(device)
+
+        self.actor_target = Actor(state_size, 
+                                  action_size, 
+                                  random_seed).to(device)
+
+
         # Instantiate Critic Networks
-        self.critic_local = Critic(state_size*nbr_agents, action_size*nbr_agents, random_seed).to(device)
-        self.critic_target = Critic(state_size*nbr_agents, action_size*nbr_agents, random_seed).to(device)
+        self.critic_local = Critic(state_size*nbr_agents, 
+                                   action_size*nbr_agents, 
+                                   random_seed).to(device)
+
+        self.critic_target = Critic(state_size*nbr_agents, 
+                                    action_size*nbr_agents, 
+                                    random_seed).to(device)
         
+        
+        # Initialize Target Networks
+        self.soft_update(self.actor_local, self.actor_target, 1.0)
+        self.soft_update(self.critic_local, self.critic_target, 1.0)  
+        
+
+
         # Instantiate Optimizers
-        self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=lr_actor)
+        self.actor_optimizer = optim.Adam(self.actor_local.parameters(),
+                                          lr=lr_actor)
+
         self.critic_optimizer = optim.Adam(self.critic_local.parameters(),
                                            lr=lr_critic,
                                            weight_decay=weight_decay)
-        
-        # Noise process
+
+
+        # Instantiate Noise Process
         self.noise = OUNoise(action_size, random_seed)
-              
-            
-        # Reset agent
-        self.reset()
+
+
+        
+
+                            
+                            
+    def reset(self):
+        self.noise.reset()
+
+
         
         
         
-        
-        
-    def act(self, state, add_noise=True):
-        '''
-        Returns action for given state as per current policy.
-        '''
-        
+    def act(self, state, std_dev):
+
         state = torch.from_numpy(state).float().to(device)
         
         self.actor_local.eval()
-        action = self.actor_local(state).cpu().data.numpy()
+        with torch.no_grad():
+            action = self.actor_local(state).cpu().data.numpy()
         self.actor_local.train()
         
-        if add_noise:
-            action += self.noise.sample()
+        action += std_dev*np.random.randn(self.action_size) 
         
-        return np.asarray(action)
-    
-    
+        
+        return np.clip(action, -1, 1)
+        
 
+    
+    
+    def learn(self,
+              aug_states,
+              aug_next_states,
+              aug_actions,
+              critic_aug_next_actions,
+              actor_aug_actions,
+              rewards,
+              dones):
         
+    
+        # --------------------- update local critic ---------------------------- #
         
-    def reset(self):
-        '''
-        '''
-        self.noise.reset()
+        # Get predicted next-state actions and Q values from target models 
+        Q_targets_next = self.critic_target(aug_next_states, critic_aug_next_actions)
+    
+        # Compute Q targets for current states (y_i)
+        Q_targets = rewards + (self.gamma * Q_targets_next * (1 - dones))
         
-        # FIXXME - just for debug output
-        self.nbr_updates_actor = 0
-        self.nbr_updates_critic = 0
-      
-        
-        
-    def update_critic(self, states, next_states, actions, next_actions, reward, done):
-        '''
-        Updates deep Q-networks (critic) using the augmented states and actions
-        
-        Params
-        ======
-            states : augmented observation vector
-            next_states : augmented consecutive observation vector
-            actions : augmented action vector
-            next_actions : augmented next action vector
-            reward : individual reward
-            done : individual done flag
-        '''
-        
-        
-        # compute Q target values
-        next_Q_targets = self.critic_target(next_states, next_actions)
-        Q_targets = reward + (self.gamma*next_Q_targets*(1 - done))                     
-                             
-                            
-        # compute loss
-        Q_expected = self.critic_local(states, actions)
+        # Compute critic loss
+        Q_expected = self.critic_local(aug_states, aug_actions)
         critic_loss = F.mse_loss(Q_expected, Q_targets)
         
-        # update weigths
+        # Update critic weights
         self.critic_optimizer.zero_grad()
-        critic_loss.backward(retain_graph=True)
-        torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(), 1)
+        critic_loss.backward()
+        #torch.nn.utils.clip_grad_norm_(self.critic_local.parameters(), 1)
         self.critic_optimizer.step()
         
         
-        # FIXXME - just for debug output
-        self.nbr_updates_critic += 1
-
+        # ------------------------- update local actor ------------------------- #
+        # Compute actor loss
+        actor_loss = -self.critic_local(aug_states, actor_aug_actions).mean()
         
-        
-        
-    def update_actor(self, states, actions):
-        '''
-        Updates deep policy networks (actor) using the augmented state vector
-        
-        Params
-        ======
-            states : augmented observation vector
-            actions : augmented action vector
-        '''
-    
-        # compute loss
-        actor_loss = -self.critic_local(states, actions).mean()
-        
-        # update weights
+        # Minimize the loss
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.actor_local.parameters(), 1)
-        self.actor_optimizer.step() 
-        
-        self.nbr_updates_actor += 1
+        #torch.nn.utils.clip_grad_norm_(self.actor_local.parameters(), 1)
+        self.actor_optimizer.step()
         
         
+ 
         
-    def soft_update(self, local_model, target_model):
-        '''
+        
+    '''   
+    
+    def learn(self, states, next_states, actions, next_actions, rewards, dones):
+        
+    
+        # --------------------- update local critic ---------------------------- #
+        
+        # Get predicted next-state actions and Q values from target models
+        Q_targets_next = self.critic_target(next_states,
+                                            next_actions)
+         
+        # Compute Q targets for current states (y_i)
+        Q_targets = rewards + (self.gamma * Q_targets_next * (1 - dones))
+        
+        # Compute critic loss
+        Q_expected = self.critic_local(states, actions)
+        critic_loss = F.mse_loss(Q_expected, Q_targets)
+        
+        # Update critic weights
+        self.critic_optimizer.zero_grad()
+        #critic_loss.backward()
+        critic_loss.backward(retain_graph=True)
+        self.critic_optimizer.step()
+    
+    
+        # ------------------------- update local actor ------------------------- #
+        # Compute actor loss
+        actor_loss = -self.critic_local(states, actions).mean()
+        
+        # Minimize the loss
+        self.actor_optimizer.zero_grad()
+        #actor_loss.backward(retain_graph=True)
+        actor_loss.backward()
+        self.actor_optimizer.step()
+        
+        
+    '''
+        
+        
+    def soft_update(self, local_model, target_model, tau):
+        """
         Soft update model parameters.
         θ_target = τ*θ_local + (1 - τ)*θ_target
 
@@ -347,21 +353,24 @@ class DDPG():
         ======
             local_model: PyTorch model (weights will be copied from)
             target_model: PyTorch model (weights will be copied to)
-            tau (float): interpolation parameter 
-        '''
-        
-        
-        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
-            target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
+        """
+        for target_param, local_param in zip(target_model.parameters(),
+                                             local_model.parameters()):
+            
+            target_param.data.copy_(tau*local_param.data + \
+                                    (1.0-tau)*target_param.data)
 
-        
+            
 
+            
+            
+            
 class OUNoise:
     '''
     Ornstein-Uhlenbeck process.
     '''
 
-    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.2):
+    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.6):
         '''
         Initialize parameters and noise process.
         '''
@@ -386,7 +395,12 @@ class OUNoise:
         dx = self.theta * (self.mu - x) + self.sigma * np.random.standard_normal(self.size)
         self.state = x + dx
         return self.state
+
     
+    
+    
+    
+      
     
     
 class ReplayBuffer:
