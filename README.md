@@ -4,7 +4,7 @@
 
 
 
-# Project 3: Colaboration and Competition
+# Project 3: Collaboration and Competition
 ### Introduction
 
 The content in this repository was created in order to accomplish the third  project assignment of Udacity's [Deep Reinforcement Learning Nanodegree](https://www.udacity.com/course/deep-reinforcement-learning-nanodegree--nd893) and utilizes Unity's  [Tennis](https://github.com/Unity-Technologies/ml-agents/blob/master/docs/Learning-Environment-Examples.md#tennis) environment.
@@ -75,4 +75,4 @@ agent_B.actor_local.load_state_dict(torch.load('ddpg_actor_B.pth'))
 agent_B.critic_local.load_state_dict(torch.load('ddpg_critic_B.pth'))
 ```
 
-
+k 
