@@ -7,7 +7,7 @@
 # Project 3: Colaboration and Competition
 ### Introduction
 
-The content in this repository was created in order to accomplish the third  project assignment of Udacity's [Deep Reinforcement Learning Nanodegree](https://www.udacity.com/course/deep-reinforcement-learning-nanodegree--nd893) and is utilizes Unity's  [Tennis](https://github.com/Unity-Technologies/ml-agents/blob/master/docs/Learning-Environment-Examples.md#tennis) environment.
+The content in this repository was created in order to accomplish the third  project assignment of Udacity's [Deep Reinforcement Learning Nanodegree](https://www.udacity.com/course/deep-reinforcement-learning-nanodegree--nd893) and utilizes Unity's  [Tennis](https://github.com/Unity-Technologies/ml-agents/blob/master/docs/Learning-Environment-Examples.md#tennis) environment.
 
 #### Objective
 The task is to control two rackets to bounce a ball over a net. 
@@ -19,7 +19,7 @@ The task is to control two rackets to bounce a ball over a net.
 Two continuous actions are available (numbers between -1.0 and 1.0), corresponding to movement toward (or away from) the net, and jumping. 
 
 #### Observation Space
-The observation space consists of 8 variables corresponding to the position and velocity of the ball and racket. Each agent receives its own, local observation.
+The observation space consists of 24 variables corresponding to the position and velocity of the ball and racket. Each agent receives its own, local observation.
 
 
 #### Reward
